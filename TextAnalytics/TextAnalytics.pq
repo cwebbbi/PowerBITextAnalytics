@@ -1,47 +1,77 @@
 ﻿section TextAnalytics;
 
+//Function parameters with documentation
+
 //Function to expose the Key Phrases web service
 [DataSource.Kind="TextAnalytics"]
-shared TextAnalytics.KeyPhrases = (optional inputtext as list, optional numberoflanguages as number) as table => 
-        GetKeyPhrases(inputtext);
+shared TextAnalytics.KeyPhrases = Value.ReplaceType(KeyPhrasesImpl, KeyPhrasesParameters);
 
+KeyPhrasesParameters =
+   type function (
+        optional inputtext as ( type list meta[
+        Documentation.FieldCaption = "Input Text"
+        ]),
+        optional languages as ( type list meta[
+        Documentation.FieldCaption = "Languages"
+        ])
+        )
+        as table meta[
+        Documentation.Name = "KeyPhrases",
+        Documentation.LongDescription = "Calls the Microsoft Cognitive Services Text Analytics Key Phrases API",
+        Documentation.Examples = {[
+            Description = "Returns a table with the key phrases identified from each piece of text",
+            Code = "TextAnalytics.KeyPhrases({""blue is my favourite colour"", ""what time it is please?"", ""twinkle, twinkle little star, how I wonder what you are""})",
+            Result = "#table({""id"", ""text"", ""call bucket"", ""keyPhrases""}, {{0, ""blue is my favourite colour"", 1, ""blue""}, {1, ""Hello world"", 1, ""time""}, {2, ""twinkle, twinkle little star, how I wonder what you are"", 1, ""twinkle""}, {2, ""twinkle, twinkle little star, how I wonder what you are"", 1, ""little star""}})"
+        ]}
+        ];
 
-//Function to expose the Detect Language web service
-[DataSource.Kind="TextAnalytics"]
-shared TextAnalytics.DetectLanguage = (optional inputtext as list, optional numberoflanguages as number) as table =>
-        if numberoflanguages = null 
-        then
-            GetLanguages(inputtext)
-        else
-            GetLanguages(inputtext, numberoflanguages);
-
-//Function to expose the Sentiment web service
-[DataSource.Kind="TextAnalytics"]
-shared TextAnalytics.Sentiment = (optional inputtext as list, optional numberoflanguages as number) as table => 
-        GetSentiment(inputtext);
-
-//Helper functions
-
-GetKeyPhrases = (inputtext as list) as table =>
+KeyPhrasesImpl = (optional inputtext as list, optional languages as list) as table => 
 let
-    //If no data is supplied, create a list with one sample document
-    inputtexttest = if inputtext=null then {"Hello World"} else inputtext,
-    PrepareData = PrepareInputText(inputtexttest),
+    //if inputtext parameter is null, use an empty list
+    CheckForInputText = if inputtext = null then {} else List.Buffer(inputtext),
+    BufferLanguages = if languages = null then null else List.Buffer(languages),
+    PrepareData = if languages = null then PrepareInputText(CheckForInputText) else PrepareInputText(CheckForInputText, BufferLanguages),
     //Call the web service once for each partition
     CallWebService = List.Transform(PrepareData, each CallTextAnalyticsWebService("keyPhrases", _)),
     //Combine list of tables into one table
     OneTable = Table.Combine(CallWebService),
     #"Expanded Column1" = Table.ExpandRecordColumn(OneTable, "Column1", {"id", "keyPhrases"}, {"id", "keyPhrases"}),
     #"Expanded Column2" = Table.ExpandListColumn(#"Expanded Column1", "keyPhrases"),
-    JoinWithOriginalTable = Table.Join(Table.Combine(PrepareData), "id", #"Expanded Column2", "id")
+    JoinWithOriginalTable = Table.Join(Table.Combine(PrepareData), "id", #"Expanded Column2", "id"),
+    SetDataTypes = Table.TransformColumnTypes(JoinWithOriginalTable,{{"id", Int64.Type}, {"text", type text}, {"call bucket", Int64.Type}, {"keyPhrases", type text}}),
+    SetLanguageDataType = if languages = null then SetDataTypes else Table.TransformColumnTypes(SetDataTypes,{{"language", type text}})
 in
-     JoinWithOriginalTable;
+     SetLanguageDataType;
 
-GetLanguages = (inputtext as list, optional numberoflanguages as number) as table =>
+
+//Function to expose the Detect Language web service
+[DataSource.Kind="TextAnalytics"]
+shared TextAnalytics.DetectLanguage = Value.ReplaceType(DetectLanguageImpl, DetectLanguageParameters);
+
+DetectLanguageParameters =
+   type function (
+        optional inputtext as ( type list meta[
+        Documentation.FieldCaption = "Input Text"
+        ]),
+        optional numberoflanguages as ( type number meta[
+        Documentation.FieldCaption = "Number Of Languages"
+        ])
+        )
+        as table meta[
+        Documentation.Name = "DetectLanguages",
+        Documentation.LongDescription = "Calls the Microsoft Cognitive Services Text Analytics Detect Language API",
+        Documentation.Examples = {[
+            Description = "Returns a table with the languages identified from each piece of text",
+            Code = "TextAnalytics.DetectLanguage({""Ich spreche nicht viel Deutsch"", ""Bonjour"", ""¿Dónde hay un restaurante?""})",
+            Result = "#table({""id"", ""text"", ""call bucket"", ""name"", ""iso6391Name"", ""score""}, {{0, ""Ich spreche nicht viel Deutsch"", 1, ""German"", ""de"", 1}, {1, ""Bonjour"", 1, ""French"", ""fr"", 1}, {2, ""¿Dónde hay un restaurante?"", 1, ""Spanish"", ""es"", 1}})"
+        ]}
+        ];
+
+DetectLanguageImpl = (optional inputtext as list, optional numberoflanguages as number) as table =>
 let
-    //If no data is supplied, create a list with one sample document
-    inputtexttest = if inputtext=null then {"Hello World"} else inputtext,
-    PrepareData = PrepareInputText(inputtexttest),
+    //if inputtext parameter is null, use an empty list
+    CheckForInputText = if inputtext = null then {} else List.Buffer(inputtext),
+    PrepareData = PrepareInputText(CheckForInputText),
     //Call the web service once for each partition
     CallWebService = List.Transform(PrepareData, each if numberoflanguages=null then CallTextAnalyticsWebService("languages", _) else CallTextAnalyticsWebService("languages", _, numberoflanguages)),
     //Combine list of tables into one table
@@ -49,23 +79,53 @@ let
     #"Expanded Column1" = Table.ExpandRecordColumn(OneTable, "Column1", {"id", "detectedLanguages"}, {"id", "detectedLanguages"}),
     #"Expanded Column2" = Table.ExpandListColumn(#"Expanded Column1", "detectedLanguages"),
     #"Expanded Column3" = Table.ExpandRecordColumn(#"Expanded Column2", "detectedLanguages", {"name", "iso6391Name", "score"}, {"name", "iso6391Name", "score"}),
-    JoinWithOriginalTable = Table.Join(Table.Combine(PrepareData), "id", #"Expanded Column3", "id")
+    JoinWithOriginalTable = Table.Join(Table.Combine(PrepareData), "id", #"Expanded Column3", "id"),
+    SetDataTypes = Table.TransformColumnTypes(JoinWithOriginalTable,{{"id", Int64.Type}, {"text", type text}, {"call bucket", Int64.Type}, {"name", type text}, {"iso6391Name", type text}, {"score", type number}})
 in
-     JoinWithOriginalTable;
+     SetDataTypes;
 
-GetSentiment = (inputtext as list) as table =>
+//Function to expose the Sentiment web service
+[DataSource.Kind="TextAnalytics"]
+shared TextAnalytics.Sentiment = Value.ReplaceType(SentimentImpl, SentimentParameters);
+
+SentimentParameters =
+   type function (
+        optional inputtext as ( type list meta[
+        Documentation.FieldCaption = "Input Text"
+        ]),
+        optional languages as ( type list meta[
+        Documentation.FieldCaption = "Languages"
+        ])
+        )
+        as table meta[
+        Documentation.Name = "Sentiment",
+        Documentation.LongDescription = "Calls the Microsoft Cognitive Services Text Analytics Sentiment API",
+        Documentation.Examples = {[
+            Description = "Returns a table with the sentiment identified from each piece of text",
+            Code = "TextAnalytics.Sentiment({""this is great"", ""this is terrible""})",
+            Result = "#table({""id"", ""text"", ""call bucket"", ""score""}, {{0, ""this is great"", 0.99797004461288452}, {1, ""this is terrible"", 1, 0.00062239170074462891})"
+        ]}
+        ];
+
+SentimentImpl = (optional inputtext as list, optional languages as list) as table => 
 let
-    //If no data is supplied, create a list with one sample document
-    inputtexttest = if inputtext=null then {"Hello World"} else inputtext,
-    PrepareData = PrepareInputText(inputtexttest),
+    //if inputtext parameter is null, use an empty list
+    CheckForInputText = if inputtext = null then {} else List.Buffer(inputtext),
+    BufferLanguages = if languages = null then null else List.Buffer(languages),
+    PrepareData = if languages = null then PrepareInputText(CheckForInputText) else PrepareInputText(CheckForInputText, BufferLanguages),
     //Call the web service once for each partition
     CallWebService = List.Transform(PrepareData, each CallTextAnalyticsWebService("sentiment", _)),
     //Combine list of tables into one table
     OneTable = Table.Combine(CallWebService),
     #"Expanded Column1" = Table.ExpandRecordColumn(OneTable, "Column1", {"id", "score"}, {"id", "score"}),
-    JoinWithOriginalTable = Table.Join(Table.Combine(PrepareData), "id", #"Expanded Column1", "id")
+    JoinWithOriginalTable = Table.Join(Table.Combine(PrepareData), "id", #"Expanded Column1", "id"),
+    SetDataTypes = Table.TransformColumnTypes(JoinWithOriginalTable,{{"id", Int64.Type}, {"text", type text}, {"call bucket", Int64.Type}, {"score", type number}}),
+    SetLanguageDataType = if languages = null then SetDataTypes else Table.TransformColumnTypes(SetDataTypes,{{"language", type text}})
 in
-     JoinWithOriginalTable;
+     SetLanguageDataType;
+
+
+//Helper functions
 
 //Make a single call to one of the Text Analytics web services
 CallTextAnalyticsWebService = (webservicename as text, inputtable as table, optional numberoflanguages as number) as table =>
@@ -78,7 +138,6 @@ CallTextAnalyticsWebService = (webservicename as text, inputtable as table, opti
                         Content=Json.FromValue(TableForJSON),
                         Headers = [#"Ocp-Apim-Subscription-Key"=apiKey],
                         ManualCredentials = true
- //                         Headers = [#"Ocp-Apim-Subscription-Key"="cfa8a47784754cb4a39cc645673d384a"]
                         ],
         AddNumberOfLanguagesToDetect = if numberoflanguages=null then OptionsRecord else Record.AddField(OptionsRecord, "Query", [numberOfLanguagesToDetect=Text.From(numberoflanguages)]),
         CallService = ()=>
@@ -92,7 +151,7 @@ CallTextAnalyticsWebService = (webservicename as text, inputtable as table, opti
 in
     #"Converted to Table";
 
-PrepareInputText = (inputtext as list) =>
+PrepareInputText = (inputtext as list, optional languages as list) =>
 //Prepare input data for all web services
 let
     //Truncate each document to 5120 characters, the maximum the web services will accept for a single document (ie 10KB)
@@ -111,9 +170,13 @@ let
                                 [rowcounter=[rowcounter]+1, bucketrowcounter=[bucketrowcounter]+1,runningsum=[runningsum]+Text.Length(TruncateText{[rowcounter]+1}), bucketid=[bucketid]] 
                             else
                                 [rowcounter=[rowcounter]+1, bucketrowcounter=0, runningsum=Text.Length(TruncateText{[rowcounter]+1}), bucketid=[bucketid]+1],
-                    each {Text.From([rowcounter]), TruncateText{[rowcounter]}, Text.From([bucketid])}),
+                    each
+                        if languages=null then 
+                        {Text.From([rowcounter]), TruncateText{[rowcounter]}, Text.From([bucketid])}
+                        else
+                        {Text.From([rowcounter]), TruncateText{[rowcounter]}, Text.From([bucketid]), languages{[rowcounter]}}),
     //Turn the list returned by the FindBuckets step into a table
-    CreateTable = #table({"id", "text", "call bucket"}, FindBuckets),
+    CreateTable = if languages = null then #table({"id", "text", "call bucket"}, FindBuckets) else #table({"id", "text", "call bucket", "language"}, FindBuckets),
     //Find total number of buckets
     BucketCount = List.Count(List.Distinct(List.Transform(FindBuckets, each _{2}))),
     //Split table into a list of tables
@@ -130,4 +193,5 @@ TextAnalytics = [
     ],
     Label = Extension.LoadString("DataSourceLabel")
 ];
+
 
