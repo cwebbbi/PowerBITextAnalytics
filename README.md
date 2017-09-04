@@ -14,4 +14,4 @@ This function takes a list of text values (and an optional list of language iden
 - TextAnalytics.Sentiment(inputtext as list, optional languages as list) as table
 This function takes a list of text values (and an optional list of language identifiers for each piece of text) and returns a table containing the input text and a score representing the sentiment detected for each piece of text.
 
-There are a number of examples of how these functions can be used in the TextAnalytics.query.pq file included in the project, as well as this blog post on Chris Webb's BI Blog.
+There are a number of examples of how these functions can be used in the TextAnalytics.query.pq file included in the project, in the [example Power BI .pbix file](https://github.com/cwebbbi/PowerBITextAnalytics/blob/master/PBTextAnalyticsExamples.pbix), as well as [this blog post](https://blog.crossjoin.co.uk/2017/09/04/power-bi-custom-data-connector-for-language-detection-key-phrase-extraction-and-sentiment-analysis/) on Chris Webb's BI Blog.
